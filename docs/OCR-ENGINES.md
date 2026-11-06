@@ -17,18 +17,19 @@
 
 ## 2. 安装时如何选择
 
-安装器会问一次，选择结果写进启动器脚本的 `MARKITDOWN_OCR_ENGINE` 环境变量；
-WebUI 会预选该引擎，用户仍可在页面上临时改。
+安装器问一次，**可多选**（`1 2 4` / `1,2,4` / 名称混写都行），各引擎的依赖分别安装。
+默认引擎取所选里最强的一个（4 > 1+2 > 2 > 1）写进启动器脚本的 `MARKITDOWN_OCR_ENGINE`；
+WebUI 下拉列出所有实际可用的引擎，用户仍可临时改。
 
 | 平台 | 选项 | 会安装什么 | 需要联网/管理员 |
 |---|---|---|---|
 | macOS | 1) Apple Vision（默认） | 无 | 否 |
 | macOS | 2) Tesseract | `brew install tesseract tesseract-lang` | 装依赖时需联网 |
-| macOS | 3) 两者 | 同 2，引擎设为 `auto` | 装依赖时需联网 |
-| macOS | 4) PaddleOCR-VL（可选） | `git clone .../mlx-community/PaddleOCR-VL-1.6-4bit.git`（4-bit MLX，671 MiB）+ LFS 拉取 | 克隆时需联网 |
+| macOS | 3) 1+2 组合 | 同 2，引擎设为 `auto` | 装依赖时需联网 |
+| macOS | 4) PaddleOCR-VL（可选） | `git clone .../mlx-community/PaddleOCR-VL-1.6-4bit.git`（4-bit MLX，671 MiB）+ 自动装 `git-lfs` 拉全 LFS + 启动 `mlx_vlm.server` | 克隆时需联网 |
 | Windows | 1) Windows 内置 OCR | 检测并提示安装 `Language.OCR~~~zh-CN~0.0.1.0` | **是**（管理员 + Windows Update/FOD） |
 | Windows | 2) Tesseract 精准（默认） | winget 装 Tesseract + 下载 `tessdata_best` 的 chi_sim/chi_tra/eng | 装依赖时需联网 |
-| Windows | 3) 两者 | 同上，引擎设为 `auto` | 是 |
+| Windows | 3) 1+2 组合 | 同上，引擎设为 `auto` | 是 |
 | Windows | 4) PaddleOCR-VL（可选） | `git clone .../PaddlePaddle/PaddleOCR-VL-1.6.git`（官方 BF16，1.79 GiB）+ LFS 拉取 | 克隆时需联网 |
 
 **两个平台的第 4 项不是同一套推理**：macOS 用 4-bit MLX 权重 + `mlx_vlm.server`（Metal GPU，见第 6 节）；

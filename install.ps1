@@ -4,11 +4,12 @@
 #
 # Non-interactive:
 #   $env:MARKITDOWN_OCR='tesseract'; irm .../install.ps1 | iex
+#   $env:MARKITDOWN_OCR='1 2 4'; irm .../install.ps1 | iex   # 多选，空格或逗号分隔
 #   $env:MARKITDOWN_OCR='paddleocr-vl'; irm .../install.ps1 | iex
 #
-# Asks which OCR engine to use, installs only what that choice needs,
-# downloads a prebuilt binary (or builds from source as a fallback), then
-# starts the local WebUI at http://127.0.0.1:5001.
+# Asks which OCR engines to install (any combination is allowed), installs
+# only what those choices need, downloads a prebuilt binary (or builds from
+# source as a fallback), then starts the local WebUI at http://127.0.0.1:5001.
 # Everything stays on 127.0.0.1. No file is ever uploaded anywhere.
 
 $ErrorActionPreference = 'Stop'
@@ -29,30 +30,46 @@ function Die($m)  { Write-Host "==> 错误: $m" -ForegroundColor Red; throw $m }
 if (-not $IsWindows -and $env:OS -ne 'Windows_NT') { Die '这个安装器只用于 Windows。macOS 请用 install.sh。' }
 
 Write-Host ''
-Write-Host '请选择 OCR 引擎（中文识别）：' -ForegroundColor White
+Write-Host '请选择要安装的 OCR 引擎（中文识别，可多选）：' -ForegroundColor White
 Write-Host '  1) Windows 内置 OCR   系统级、零模型；需已装 zh-CN OCR 语言包（管理员/联网）'
 Write-Host '  2) Tesseract 精准      winget 安装 + tessdata_best 简体/繁体/英文  [推荐]'
-Write-Host '  3) 两者都要            内置 OCR 优先 + Tesseract 兜底（最稳）'
+Write-Host '  3) 1+2 组合            内置 OCR 优先 + Tesseract 兜底（最稳）'
 Write-Host '  4) PaddleOCR-VL-1.6    可选高精度 VLM；下载官方 BF16 模型（约 1.79 GiB）'
 Write-Host ''
+Write-Host '  可组合，例如输入  1 2 4  或  1,2,4（默认 2）'
 
 $choice = $env:MARKITDOWN_OCR
 if (-not $choice) {
-    $raw = Read-Host '输入 1 / 2 / 3 / 4（默认 2）'
+    $raw = Read-Host '输入编号（可多选，默认 2）'
     $choice = if ($raw) { $raw } else { '2' }
 }
 
-switch -Regex ($choice.ToString().ToLower()) {
-    '^(1|winocr|windows)$' { $engine = 'winocr';    $desc = 'Windows 内置 OCR' }
-    '^(2|tesseract)$'      { $engine = 'tesseract'; $desc = 'Tesseract 精准' }
-    '^(3|both|auto)$'      { $engine = 'auto';      $desc = '内置 OCR + Tesseract' }
-    '^(4|paddleocr-vl|vlm|paddle)$' { $engine = 'paddleocr-vl'; $desc = 'PaddleOCR-VL-1.6（官方 BF16）' }
-    default { Die "无法识别的选项：${choice}（可选 1/2/3/4）" }
+$wantWinOcr = $false; $wantTesseract = $false; $wantVlm = $false
+foreach ($tok in ($choice.ToString().ToLower() -split '[\s,;]+' | Where-Object { $_ })) {
+    if     ($tok -in @('1','winocr','windows'))             { $wantWinOcr = $true }
+    elseif ($tok -in @('2','tesseract'))                   { $wantTesseract = $true }
+    elseif ($tok -in @('3','both','auto'))                 { $wantWinOcr = $true; $wantTesseract = $true }
+    elseif ($tok -in @('4','paddleocr-vl','vlm','paddle')) { $wantVlm = $true }
+    else { Die "无法识别的选项：$tok（可选 1/2/3/4，可多选）" }
 }
+if (-not ($wantWinOcr -or $wantTesseract -or $wantVlm)) { $wantTesseract = $true }
+
+# Windows has no MLX: the VLM needs an external inference service, so it is
+# only the default when it is the sole choice (otherwise pick a working one).
+if     ($wantVlm -and -not ($wantWinOcr -or $wantTesseract)) { $engine = 'paddleocr-vl' }
+elseif ($wantWinOcr -and $wantTesseract)                     { $engine = 'auto' }
+elseif ($wantTesseract)                                      { $engine = 'tesseract' }
+else                                                         { $engine = 'winocr' }
+
+$descParts = @()
+if ($wantWinOcr)    { $descParts += 'Windows 内置 OCR' }
+if ($wantTesseract) { $descParts += 'Tesseract 精准' }
+if ($wantVlm)       { $descParts += 'PaddleOCR-VL-1.6（官方 BF16）' }
+$desc = $descParts -join ' + '
 Info "已选择：$desc → 默认引擎 $engine"
 
 # ---- Windows built-in OCR language capability ------------------------------
-if ($engine -in @('winocr', 'auto')) {
+if ($wantWinOcr) {
     try {
         $cap = Get-WindowsCapability -Online |
             Where-Object { $_.Name -like 'Language.OCR*zh-CN*' } |
@@ -80,7 +97,7 @@ if ($engine -in @('winocr', 'auto')) {
 }
 
 # ---- Tesseract + Chinese tessdata ------------------------------------------
-if ($engine -in @('tesseract', 'auto')) {
+if ($wantTesseract) {
     $tessExe = Get-Command tesseract -ErrorAction SilentlyContinue
     if (-not $tessExe) {
         $default = 'C:\Program Files\Tesseract-OCR\tesseract.exe'
@@ -123,7 +140,7 @@ if ($engine -in @('tesseract', 'auto')) {
 # ---- optional PaddleOCR-VL-1.6 model mount (Windows, official BF16) --------
 # ModelScope uses Git LFS: a plain clone leaves 134-byte pointers. We always
 # verify model.safetensors is really downloaded.
-if ($engine -eq 'paddleocr-vl') {
+if ($wantVlm) {
     if (-not (Test-Path (Join-Path $VlmWinDir 'config.json'))) {
         Info "克隆官方模型仓库：$VlmWinRepo"
         if (Test-Path $VlmWinDir) { Remove-Item -Recurse -Force $VlmWinDir }
@@ -218,9 +235,10 @@ if ($running) {
 
 Write-Host ''
 Info "完成：$Url"
-Write-Host "  OCR 引擎   $desc"
+Write-Host "  已装引擎   $desc"
+Write-Host "  默认引擎   $engine"
 Write-Host "  二进制     $bin"
 Write-Host "  启动器     $launcher"
 Write-Host '  停止       Stop-Process -Name markitdown-rs'
-Write-Host '  换引擎     重跑安装器，或在网页里临时切换'
+Write-Host '  换引擎     重跑安装器（可多选），或在网页里临时切换'
 Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue

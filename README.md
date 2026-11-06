@@ -15,7 +15,7 @@
 
 ---
 
-## 一行命令安装（会问你选哪个 OCR 引擎）
+## 一行命令安装（可一次选多个 OCR 引擎）
 
 **macOS**
 
@@ -29,19 +29,22 @@ curl -fsSL https://raw.githubusercontent.com/nfeuism/markitdown-rs/main/install.
 irm https://raw.githubusercontent.com/nfeuism/markitdown-rs/main/install.ps1 | iex
 ```
 
-安装器会交互询问 OCR 引擎，然后只装该选项需要的依赖、下载预编译二进制、启动服务并打开
-`http://127.0.0.1:5001`。选择结果写进启动器，之后 WebUI 会预选它（页面里仍可临时改）。
+安装器会交互询问要装哪些 OCR 引擎，**可多选**：输入 `1 2 4` 或 `1,2,4` 即一次装好三项。
+依赖按所选引擎分别安装、下载预编译二进制、启动服务并打开 `http://127.0.0.1:5001`。
+默认引擎取所选里最强的一个（4 > 1+2 > 2 > 1），写进启动器；WebUI 下拉里仍可临时切换。
 
 | 平台 | 选项 | 说明 |
 |---|---|---|
 | macOS | 1) **Apple Vision**（默认） | 系统内置、零下载、中文精准、ANE 加速 |
 | macOS | 2) Tesseract | `brew` 装简体/繁体中文包，跨平台兜底 |
-| macOS | 3) 两者 | Vision 优先 + Tesseract 兜底 |
-| macOS | 4) **PaddleOCR-VL**（可选） | 克隆 4-bit MLX 量化模型，走 M 系列 Metal GPU；需 `scripts/start-paddleocr-vl.sh` |
+| macOS | 3) 1+2 组合 | 等价于输入 `1 2`，引擎设为 `auto` |
+| macOS | 4) **PaddleOCR-VL**（可选） | 克隆 4-bit MLX 量化模型，自动拉权重并启动 `127.0.0.1:8111` 服务 |
 | Windows | 1) Windows 内置 OCR | 系统级、零模型，**需 zh-CN OCR 语言包**（管理员/联网） |
 | Windows | 2) **Tesseract 精准**（默认） | winget 装引擎 + `tessdata_best` 简/繁/英 |
-| Windows | 3) 两者 | 内置 OCR 优先 + Tesseract 兜底 |
+| Windows | 3) 1+2 组合 | 等价于输入 `1 2`，引擎设为 `auto` |
 | Windows | 4) **PaddleOCR-VL**（可选） | 克隆官方 BF16 模型（约 1.79 GiB）；推理需另起服务，见下 |
+
+四项可任意组合，例如 `1 2 4` = Vision + Tesseract + VLM 全装；`3` 仍是 `1 2` 的简写。
 
 **选项 4 会自动挂载模型**（两个平台用不同仓库/格式，安装器自动判断）：
 
@@ -50,9 +53,16 @@ irm https://raw.githubusercontent.com/nfeuism/markitdown-rs/main/install.ps1 | i
 | macOS | `git clone https://www.modelscope.cn/mlx-community/PaddleOCR-VL-1.6-4bit.git ~/PaddleOCR-VL-1.6-4bit` | `model.safetensors` 703,562,705 B ≈ 671 MiB（4-bit MLX） |
 | Windows | `git clone https://www.modelscope.cn/PaddlePaddle/PaddleOCR-VL-1.6.git %USERPROFILE%\PaddleOCR-VL-1.6` | `model.safetensors` 1,917,255,968 B ≈ 1.79 GiB（官方 BF16） |
 
-两个仓库都用 **Git LFS**：安装器会检测 `git-lfs`，自动 `git lfs install --local && git lfs pull`，
-并校验 `model.safetensors` 不是 134 字节的指针。没装 git-lfs 时会打印修复命令，其余 OCR 不受影响。
-已存在的目录会被复用，不会重复克隆。
+两个仓库都用 **Git LFS**。macOS 安装器现在把这条链路一次做完，不再留下「目录存在但显示未启用」的状态：
+
+1. 没装 `git-lfs` 就自动 `brew install git-lfs`（原来只打印一句提示就留下 134 字节指针）；
+2. `git lfs install --local && git lfs pull`，校验**所有** LFS 文件（`tokenizer.json` 同样会是指针）已换成真权重；
+3. 把 `scripts/start-paddleocr-vl.sh` 下载到 `~/.local/share/markitdown-rs/scripts/`，后台启动 `mlx_vlm.server`；
+4. 生成的启动器带上同一段自启逻辑，重启后 VLM 服务会自动拉起。
+
+Rust 二进制只是客户端，`paddleocr_vl` 是否可用取决于 `127.0.0.1:8111/health`，且是**每次请求动态探测**，
+服务起来后无需重启 WebUI。已存在的目录会被复用，不会重复克隆。首次装 `mlx-vlm` 需要几分钟，
+国内网络可加 `MARKITDOWN_PYPI_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple`。
 
 > ⚠️ **平台差异**：Windows 没有 MLX，官方 BF16 权重**不能**直接用 macOS 那套 `mlx_vlm.server` 跑。
 > 官方建议 WSL2 + Docker 或 PaddlePaddle CPU 部署推理服务；服务起来后设置
@@ -62,10 +72,12 @@ irm https://raw.githubusercontent.com/nfeuism/markitdown-rs/main/install.ps1 | i
 非交互（CI / 脚本）用环境变量跳过提问：
 
 ```bash
-MARKITDOWN_OCR=vision curl -fsSL .../install.sh | bash      # 或 tesseract / auto / paddleocr-vl
+MARKITDOWN_OCR=vision curl -fsSL .../install.sh | bash       # 单选
+MARKITDOWN_OCR="1 2 4" curl -fsSL .../install.sh | bash       # 多选：Vision + Tesseract + VLM
 ```
 ```powershell
-$env:MARKITDOWN_OCR='tesseract'; irm .../install.ps1 | iex  # 或 winocr / auto / paddleocr-vl
+$env:MARKITDOWN_OCR='tesseract'; irm .../install.ps1 | iex  # 单选
+$env:MARKITDOWN_OCR='1 2 4'; irm .../install.ps1 | iex      # 多选
 ```
 
 其它可覆盖变量：`MARKITDOWN_PORT`（默认 5001）、`MARKITDOWN_INSTALL_DIR`。
@@ -159,6 +171,7 @@ brew install poppler                    # 非 macOS 上渲染扫描 PDF
 | `MARKITDOWN_VLM_PORT` | `8111` |
 | `MARKITDOWN_VLM_PROMPT` | `OCR:` |
 | `MARKITDOWN_VLM_TIMEOUT_SECS` | `300` |
+| `MARKITDOWN_PYPI_INDEX` | 空（用官方 PyPI）；国内建议清华镜像，仅安装 `mlx-vlm` 时生效 |
 
 命令行直接试（不经过 WebUI）：
 
