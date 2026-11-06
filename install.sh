@@ -44,7 +44,7 @@ read_tty() {
   printf '%s' "$answer"
 }
 
-info "markitdown-rs 安装程序（macOS $ARCH）"
+info "markitdown-rs 安装程序（macOS ${ARCH}）"
 printf '\n' >&2
 printf '请选择 OCR 引擎（中文识别）：\n' >&2
 printf '  1) Apple Vision   系统内置、零下载、中文精准、走 ANE 加速  [推荐]\n' >&2
@@ -57,11 +57,13 @@ if [[ -z "$CHOICE" ]]; then
   CHOICE="$(read_tty '输入 1 / 2 / 3（默认 1）：')"
 fi
 
-case "${CHOICE,,}" in
+# macOS ships bash 3.2, which has no ${VAR,,}; use tr for lowercasing.
+CHOICE_LOWER="$(printf '%s' "$CHOICE" | tr '[:upper:]' '[:lower:]')"
+case "$CHOICE_LOWER" in
   1|vision|apple|"") ENGINE="vision";  DESC="Apple Vision" ;;
   2|tesseract)        ENGINE="tesseract"; DESC="Tesseract" ;;
   3|both|auto)        ENGINE="auto";   DESC="Apple Vision + Tesseract" ;;
-  *) die "无法识别的选项：$CHOICE（可选 1/2/3）" ;;
+  *) die "无法识别的选项：${CHOICE}（可选 1/2/3）" ;;
 esac
 info "已选择：$DESC → 默认引擎 $ENGINE"
 
@@ -122,7 +124,7 @@ chmod 755 "$LAUNCHER"
 
 # ---- start -----------------------------------------------------------------
 if curl -fsS --max-time 2 "$URL/health" >/dev/null 2>&1; then
-  info "服务已在运行：$URL（本次只更新了二进制与启动器）"
+  info "服务已在运行：${URL}（本次只更新了二进制与启动器）"
 else
   info "启动服务并打开浏览器…"
   nohup "$LAUNCHER" > "$HOME/.markitdown-rs.log" 2>&1 &

@@ -19,7 +19,9 @@ pdf-extract = "0.7"
 # so we can skip the panicking branch entirely (no extra compile cost).
 lopdf = { version = "0.34", default-features = false, features = ["nom_parser"] }
 
-[target.'cfg(target_os = "macos")'.build-dependencies]
+[build-dependencies]
+# Needed by build.rs on every target (the file is compiled even when the
+# platform branch returns early); only actually invoked for macOS.
 cc = "1"
 
 [profile.release]

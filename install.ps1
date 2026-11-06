@@ -41,7 +41,7 @@ switch -Regex ($choice.ToString().ToLower()) {
     '^(1|winocr|windows)$' { $engine = 'winocr';    $desc = 'Windows 内置 OCR' }
     '^(2|tesseract)$'      { $engine = 'tesseract'; $desc = 'Tesseract 精准' }
     '^(3|both|auto)$'      { $engine = 'auto';      $desc = '内置 OCR + Tesseract' }
-    default { Die "无法识别的选项：$choice（可选 1/2/3）" }
+    default { Die "无法识别的选项：${choice}（可选 1/2/3）" }
 }
 Info "已选择：$desc → 默认引擎 $engine"
 
@@ -155,7 +155,7 @@ start "" "$Url"
 $running = $false
 try { $r = Invoke-WebRequest -Uri "$Url/health" -UseBasicParsing -TimeoutSec 2; $running = $r.StatusCode -eq 200 } catch {}
 if ($running) {
-    Info "服务已在运行：$Url（本次只更新了二进制与启动器）"
+    Info "服务已在运行：${Url}（本次只更新了二进制与启动器）"
 } else {
     Info '启动服务并打开浏览器…'
     $env:MARKITDOWN_OCR_ENGINE = $engine
