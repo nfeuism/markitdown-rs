@@ -6,7 +6,7 @@
 mod convert;
 mod documents;
 mod ocr;
-mod vlm;
+mod winocr;
 
 use axum::extract::{DefaultBodyLimit, Multipart};
 use axum::http::StatusCode;
@@ -51,7 +51,6 @@ struct Health {
     vision: bool,
     tesseract: bool,
     markitdown: bool,
-    paddleocr_vl: bool,
     default_languages: &'static str,
 }
 
@@ -62,8 +61,8 @@ struct Capabilities {
     vision: bool,
     tesseract: bool,
     markitdown: bool,
-    paddleocr_vl: bool,
-    paddleocr_vl_status: String,
+    /// Engine chosen at install time; the WebUI preselects it.
+    default_engine: String,
 }
 
 #[derive(Serialize)]
@@ -71,8 +70,6 @@ struct EngineInfo {
     id: &'static str,
     label: &'static str,
     available: bool,
-    /// Extra hint shown in the UI (e.g. how to enable an optional backend).
-    note: &'static str,
 }
 
 #[derive(Serialize)]
@@ -118,7 +115,6 @@ async fn health() -> Json<Health> {
         vision: ocr::vision_available(),
         tesseract: ocr::tesseract_available(),
         markitdown: ocr::markitdown_available(),
-        paddleocr_vl: vlm::available(),
         default_languages: "zh-Hans,en-US",
     })
 }
@@ -126,38 +122,41 @@ async fn health() -> Json<Health> {
 async fn capabilities() -> Json<Capabilities> {
     let vision = ocr::vision_available();
     let tesseract = ocr::tesseract_available();
-    let (vlm_ok, vlm_status) = vlm::status();
+    let winocr = winocr::available();
+
+    let auto_label = if cfg!(target_os = "windows") {
+        "自动（Windows 内置 OCR → Tesseract）"
+    } else {
+        "自动（Apple Vision → Tesseract）"
+    };
+
+    let mut engines = vec![
+        EngineInfo {
+            id: "auto",
+            label: auto_label,
+            available: vision || tesseract || winocr,
+        },
+        EngineInfo {
+            id: "vision",
+            label: "Apple Vision（系统内置，中文精准、零下载 · 仅 macOS）",
+            available: vision,
+        },
+        EngineInfo {
+            id: "tesseract",
+            label: "Tesseract（跨平台兜底）",
+            available: tesseract,
+        },
+    ];
+    if cfg!(target_os = "windows") {
+        engines.push(EngineInfo {
+            id: "winocr",
+            label: "Windows 内置 OCR（系统级、零模型 · 需 zh-CN 语言包）",
+            available: winocr,
+        });
+    }
+
     Json(Capabilities {
-        engines: vec![
-            EngineInfo {
-                id: "auto",
-                label: "自动（Apple Vision → Tesseract）",
-                available: vision || tesseract,
-                note: "",
-            },
-            EngineInfo {
-                id: "vision",
-                label: "Apple Vision（系统内置，中文精准、零下载）",
-                available: vision,
-                note: "",
-            },
-            EngineInfo {
-                id: "tesseract",
-                label: "Tesseract（跨平台兜底）",
-                available: tesseract,
-                note: "",
-            },
-            EngineInfo {
-                id: "paddleocr-vl",
-                label: "PaddleOCR-VL-1.6（0.9B VLM · 高精度 · 可选）",
-                available: vlm_ok,
-                note: if vlm_ok {
-                    "高精度文档解析：表格 / 公式 / 印章 / 生僻字。不会进入「自动」链路，需手动选择。"
-                } else {
-                    "需先启动本地 MLX 服务并下载约 0.68GB 模型：scripts/start-paddleocr-vl.sh"
-                },
-            },
-        ],
+        engines,
         language_presets: vec![
             LanguagePreset { id: "zh-Hans,en-US", label: "简体中文 + English（推荐）" },
             LanguagePreset { id: "zh-Hant,en-US", label: "繁體中文 + English" },
@@ -169,8 +168,7 @@ async fn capabilities() -> Json<Capabilities> {
         vision,
         tesseract,
         markitdown: ocr::markitdown_available(),
-        paddleocr_vl: vlm_ok,
-        paddleocr_vl_status: vlm_status,
+        default_engine: convert::configured_engine(),
     })
 }
 
@@ -216,7 +214,7 @@ async fn api_convert(mut multipart: Multipart) -> Result<Json<ConvertOk>, ApiErr
     }
 
     let (filename, bytes) = file.ok_or_else(|| ApiError("没有收到文件".to_string()))?;
-    if let Some(engine) = ["auto", "vision", "tesseract", "paddleocr-vl"]
+    if let Some(engine) = ["auto", "vision", "tesseract", "winocr"]
         .iter()
         .find(|e| **e == options.engine)
     {
@@ -287,11 +285,6 @@ async fn main() {
     eprintln!("  Vision    {}", yes_no(ocr::vision_available()));
     eprintln!("  Tesseract {}", yes_no(ocr::tesseract_available()));
     eprintln!("  MarkItDown CLI {}", yes_no(ocr::markitdown_available()));
-    let (vlm_ok, vlm_note) = vlm::status();
-    eprintln!("  PaddleOCR-VL-1.6 {}", if vlm_ok { "可用" } else { "未启用（可选）" });
-    if !vlm_ok {
-        eprintln!("    {vlm_note}");
-    }
     eprintln!("  仅监听 {socket}，不会暴露到局域网");
 
     if args.open {

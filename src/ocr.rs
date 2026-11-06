@@ -5,6 +5,7 @@
 //! Chinese). Tesseract is the portable fallback. Both are optional: the binary
 //! still builds and runs on Linux/Windows with just Tesseract.
 
+#[cfg(target_os = "macos")]
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -36,19 +37,45 @@ extern "C" {
 // ---------------------------------------------------------------------------
 
 pub fn find_executable(name: &str) -> Option<PathBuf> {
+    let exe = if cfg!(target_os = "windows") && !name.to_ascii_lowercase().ends_with(".exe") {
+        format!("{name}.exe")
+    } else {
+        name.to_string()
+    };
+
     if let Some(paths) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&paths) {
-            let candidate = dir.join(name);
+            let candidate = dir.join(&exe);
             if candidate.is_file() {
                 return Some(candidate);
             }
         }
     }
-    // GUI launches on macOS often lack Homebrew in PATH.
-    for fallback in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] {
-        let candidate = Path::new(fallback).join(name);
-        if candidate.is_file() {
-            return Some(candidate);
+
+    // Launchers started from a GUI often have a stripped PATH. Probe the
+    // platform's standard install locations too.
+    if cfg!(target_os = "windows") {
+        let mut fallbacks = vec![
+            PathBuf::from(r"C:\Program Files\Tesseract-OCR"),
+            PathBuf::from(r"C:\Program Files (x86)\Tesseract-OCR"),
+            PathBuf::from(r"C:\Program Files\Git\usr\bin"), // poppler via Git for Windows
+        ];
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            fallbacks.push(PathBuf::from(local).join("Programs").join("Tesseract-OCR"));
+        }
+        for dir in fallbacks {
+            let candidate = dir.join(&exe);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    } else {
+        // GUI launches on macOS often lack Homebrew in PATH.
+        for fallback in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] {
+            let candidate = Path::new(fallback).join(&exe);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
         }
     }
     None
@@ -169,20 +196,13 @@ fn tesseract_ocr(bytes: &[u8], languages: &str) -> Result<String, String> {
 }
 
 /// Recognise one image. Returns `(engine label, text)`.
-///
-/// `paddleocr-vl` is an explicit opt-in high-accuracy backend. It is never
-/// selected by `auto`, because it requires a separately started local MLX
-/// server and a ~0.68 GB model download.
 pub fn ocr_image(
     bytes: &[u8],
     engine: &str,
     languages: &str,
 ) -> Result<(String, String), String> {
-    if engine == "paddleocr-vl" {
-        return crate::vlm::ocr_image(bytes);
-    }
-
     let want_vision = matches!(engine, "auto" | "vision");
+    let want_winocr = matches!(engine, "auto" | "winocr") && winocr_available();
     let want_tesseract = matches!(engine, "auto" | "tesseract");
 
     if want_vision && vision_available() {
@@ -192,12 +212,31 @@ pub fn ocr_image(
             }
         }
     }
+
+    // Windows system OCR is second in the `auto` chain. It fails cleanly when
+    // the zh-CN language capability is not installed, so we just log and move
+    // on to Tesseract instead of surfacing an error.
+    if want_winocr {
+        match crate::winocr::ocr_image(bytes, languages) {
+            Ok((label, text)) if !text.trim().is_empty() => {
+                return Ok((label, clean_ocr(&text)));
+            }
+            Ok(_) => {}
+            Err(reason) if engine == "winocr" => return Err(reason),
+            Err(reason) => eprintln!("[ocr] Windows 内置 OCR 跳过，回退 Tesseract：{reason}"),
+        }
+    }
+
     if want_tesseract {
         let langs = to_tesseract_languages(languages);
         let text = tesseract_ocr(bytes, languages)?;
         return Ok((format!("Tesseract ({langs})"), clean_ocr(&text)));
     }
-    Err("没有可用的 OCR 引擎：macOS 需要 Vision，或安装 Tesseract".to_string())
+    Err("没有可用的 OCR 引擎：macOS 需要 Vision，Windows 需要内置 OCR 或安装 Tesseract".to_string())
+}
+
+fn winocr_available() -> bool {
+    crate::winocr::available()
 }
 
 fn clean_ocr(text: &str) -> String {
@@ -215,7 +254,6 @@ fn clean_ocr(text: &str) -> String {
 // Scanned PDF: render pages, then OCR each one
 // ---------------------------------------------------------------------------
 
-#[cfg(target_os = "macos")]
 /// Guard against a pathological document monopolising the OCR worker.
 const MAX_OCR_PAGES: usize = 300;
 
@@ -233,6 +271,7 @@ pub fn pdf_page_count(_pdf: &[u8]) -> usize {
     0
 }
 
+#[cfg(target_os = "macos")]
 fn render_with_pdfkit(pdf: &[u8], dpi: u32) -> Option<Vec<Vec<u8>>> {
     let count = unsafe { md_pdf_page_count(pdf.as_ptr(), pdf.len()) };
     if count == 0 {

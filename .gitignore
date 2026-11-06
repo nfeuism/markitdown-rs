@@ -1,6 +1,4 @@
 /target
 *.log
 .DS_Store
-# Optional PaddleOCR-VL MLX backend (created by scripts/start-paddleocr-vl.sh)
-.venv-vlm/
 

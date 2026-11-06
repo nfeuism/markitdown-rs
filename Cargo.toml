@@ -18,9 +18,6 @@ pdf-extract = "0.7"
 # Same version pdf-extract already uses: inspect font encodings before parsing
 # so we can skip the panicking branch entirely (no extra compile cost).
 lopdf = { version = "0.34", default-features = false, features = ["nom_parser"] }
-# Optional high-accuracy VLM backend: talk to a *local* mlx_vlm.server
-# (OpenAI-compatible). No model weights are bundled into this binary.
-ureq = { version = "3", features = ["json"] }
 
 [target.'cfg(target_os = "macos")'.build-dependencies]
 cc = "1"

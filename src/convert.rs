@@ -6,8 +6,7 @@
 //!   3. OCR for images and scanned PDFs (Apple Vision on macOS, Tesseract
 //!      as portable fallback).
 //!
-//! Adding a fourth OCR tier (e.g. PP-OCRv6 via `ort` + CoreML, or a local
-//! PaddleOCR-VL MLX HTTP service) only requires extending `ocr::ocr_image`.
+//! Adding another OCR backend only requires extending `ocr::ocr_image`.
 
 use std::path::Path;
 use std::process::Command;
@@ -24,7 +23,7 @@ pub const DOCUMENT_EXTENSIONS: &[&str] = &[
 
 #[derive(Debug, Clone)]
 pub struct Options {
-    /// auto | vision | tesseract
+    /// auto | vision | tesseract | winocr
     pub engine: String,
     /// Apple language identifiers, Chinese first. See README.
     pub languages: String,
@@ -33,10 +32,22 @@ pub struct Options {
     pub ocr_scanned_pdf: bool,
 }
 
+/// The OCR engine chosen at install time. The installer writes it into the
+/// launcher script; the WebUI still lets the user override it per conversion.
+/// macOS: `auto` | `vision` | `tesseract`. Windows: `auto` | `tesseract` | `winocr`.
+pub fn configured_engine() -> String {
+    let candidate = std::env::var("MARKITDOWN_OCR_ENGINE").unwrap_or_default();
+    if ["auto", "vision", "tesseract", "winocr"].contains(&candidate.as_str()) {
+        candidate
+    } else {
+        "auto".to_string()
+    }
+}
+
 impl Default for Options {
     fn default() -> Self {
         Self {
-            engine: "auto".to_string(),
+            engine: configured_engine(),
             // Ordering matters: a Chinese identifier MUST come first on recent
             // macOS, otherwise Vision silently degrades mixed CJK/Latin text.
             languages: "zh-Hans,en-US".to_string(),

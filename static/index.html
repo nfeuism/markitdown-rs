@@ -60,10 +60,6 @@
   .check{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer}
   .check input{width:16px;height:16px;accent-color:var(--scan)}
   .check small{color:var(--muted)}
-  .enginenote{display:none;margin-top:12px;padding:10px 13px;border-left:3px solid var(--scan);border-radius:0 8px 8px 0;background:var(--scan-soft);color:var(--ink);font-size:12px;line-height:1.6}
-  .vlminfo{margin-top:18px;padding:12px 14px;border:1px dashed var(--line);border-radius:10px;background:#f7faff;color:var(--muted);font-size:12px;line-height:1.7}
-  .vlminfo code{font-size:11px}
-  .vlmnote{color:var(--muted);font:11px/1.5 var(--data)}
   .actions{display:flex;align-items:center;gap:14px;margin-top:24px;flex-wrap:wrap}
   .primary{padding:12px 26px;border:0;border-radius:10px;background:var(--scan);color:#fff;font:650 15px/1 var(--body);cursor:pointer;box-shadow:0 8px 18px rgba(22,100,216,.22)}
   .primary:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
@@ -111,12 +107,10 @@
       <div class="field"><label for="languages">识别语言</label><select id="languages"></select></div>
       <div class="field"><label for="dpi">扫描 PDF 渲染 DPI</label><input type="number" id="dpi" value="200" min="72" max="600"></div>
     </div>
-    <div class="enginenote" id="enginenote"></div>
     <div class="checks">
       <label class="check"><input type="checkbox" id="ocrpdf" checked><span>扫描版 PDF 自动 OCR <small>（无文字层时逐页识别）</small></span></label>
       <label class="check"><input type="checkbox" id="usemd"><span>优先使用 MarkItDown CLI <small id="mdhint">（可选，需已安装）</small></span></label>
     </div>
-    <div class="vlminfo" id="vlminfo">正在读取引擎状态…</div>
 
     <div class="actions">
       <button class="primary" id="run">开始转换</button>
@@ -138,8 +132,8 @@
   </section>
 
   <footer>
-    启动：<code>cargo run --release -- --open</code>　健康检查：<code>/health</code>　引擎列表：<code>/api/ocr-capabilities</code><br>
-    Apple Vision 的识别语言必须把中文放在英文之前（<code>zh-Hans,en-US</code>），否则新版 macOS 会显著劣化中英混排识别。复杂表格、竖排、手写请用高精度模型层，参见 README。
+    一行命令安装（macOS / Windows）见 README　健康检查：<code>/health</code>　引擎列表：<code>/api/ocr-capabilities</code><br>
+    Apple Vision 的识别语言必须把中文放在英文之前（<code>zh-Hans,en-US</code>），否则新版 macOS 会显著劣化中英混排识别。复杂表格、竖排、手写、印章不在内置 OCR 的能力范围内。
   </footer>
 </main>
 
@@ -176,27 +170,17 @@ drop.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') 
 
 fetch('/api/ocr-capabilities').then(r => r.json()).then(c => {
   $('caps').innerHTML = [
-    ['Apple Vision', c.vision], ['Tesseract', c.tesseract],
-    ['MarkItDown CLI', c.markitdown], ['PaddleOCR-VL-1.6', c.paddleocr_vl]
-  ].map(([n,ok]) => `<span class="chip ${ok?'ok':''}"><span class="dot"></span>${n} · ${ok?'可用':'未启用'}</span>`).join('');
+    ['Apple Vision', c.vision], ['Tesseract', c.tesseract], ['MarkItDown CLI', c.markitdown]
+  ].map(([n,ok]) => `<span class="chip ${ok?'ok':''}"><span class="dot"></span>${n} · ${ok?'可用':'未安装'}</span>`).join('');
   $('engine').innerHTML = c.engines.map(e =>
-    `<option value="${e.id}" data-note="${esc(e.note || '')}" ${e.available?'':'disabled'}>${e.label}${e.available?'':'（不可用）'}</option>`).join('');
+    `<option value="${e.id}" ${e.available?'':'disabled'}>${e.label}${e.available?'':'（不可用）'}</option>`).join('');
+  if (c.default_engine && [...$('engine').options].some(o => o.value === c.default_engine && !o.disabled)) {
+    $('engine').value = c.default_engine;
+  }
   $('languages').innerHTML = c.language_presets.map(p =>
     `<option value="${p.id}">${p.label}</option>`).join('');
   if (!c.markitdown) { $('usemd').disabled = true; $('mdhint').textContent = '（未检测到 markitdown 命令）'; }
-  $('vlminfo').innerHTML = c.paddleocr_vl
-    ? '高精度 VLM 已就绪，可在「OCR 引擎」中选择；不会进入「自动」链路。'
-    : `高精度 VLM 是<strong>可选</strong>引擎，默认关闭。启用方式：<code>./scripts/start-paddleocr-vl.sh</code><br><span class="vlmnote">${esc(c.paddleocr_vl_status || '')}</span>`;
-  showEngineNote();
 }).catch(() => { $('caps').innerHTML = '<span class="chip">无法读取引擎状态</span>'; });
-
-function showEngineNote(){
-  const opt = $('engine').selectedOptions[0];
-  const note = opt && opt.dataset.note;
-  $('enginenote').textContent = note || '';
-  $('enginenote').style.display = note ? 'block' : 'none';
-}
-$('engine').addEventListener('change', showEngineNote);
 
 function setBusy(on){
   busy = on;
