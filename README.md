@@ -3,13 +3,15 @@
 把 `nfeuism/markitdown-webui2` 用 Rust 重写后的极简版本：**一个二进制 + 一个本地网页**。
 
 - 不再有 Python venv / Flask / PyInstaller / Tauri `.app` / LaunchAgent / 十几个安装脚本
-- 不下载 OCR 模型：中文 OCR 用**系统内置**引擎（macOS Apple Vision / Windows 内置 OCR）
+- 不下载 OCR 模型：中文 OCR 默认用**系统内置**引擎（macOS Apple Vision / Windows 内置 OCR）
+- 可选挂载本地 **PaddleOCR-VL-1.6**（0.9B VLM）走 Apple Silicon Metal GPU，见下节
 - 文档解析用纯 Rust（`zip` + `quick-xml` + `pdf-extract`），常见格式完全不依赖 Python
 - 只绑定 `127.0.0.1`，不联网、不上传
 - 原来的 Mac「应用」本来只是个指向 localhost 的 WebView，已删除，直接用浏览器打开网页
 
-> 按需求，第三方 ONNX / VLM 视觉模型方案已从代码与文档中**全部移除**。
 > 各平台系统 OCR 的能力边界见 [docs/OCR-ENGINES.md](docs/OCR-ENGINES.md)。
+> 第三方 ONNX 轻量识别模型与文档 VLM 曾按需求移除，后又按需求把**本地已挂载的
+> PaddleOCR-VL-1.6** 重新接回为可选引擎（默认关闭）。
 
 ---
 
@@ -35,6 +37,7 @@ irm https://raw.githubusercontent.com/nfeuism/markitdown-rs/main/install.ps1 | i
 | macOS | 1) **Apple Vision**（默认） | 系统内置、零下载、中文精准、ANE 加速 |
 | macOS | 2) Tesseract | `brew` 装简体/繁体中文包，跨平台兜底 |
 | macOS | 3) 两者 | Vision 优先 + Tesseract 兜底 |
+| macOS | 4) **PaddleOCR-VL**（可选） | 挂载本地 0.9B VLM，走 M 系列 Metal GPU；需 `scripts/start-paddleocr-vl.sh` |
 | Windows | 1) Windows 内置 OCR | 系统级、零模型，**需 zh-CN OCR 语言包**（管理员/联网） |
 | Windows | 2) **Tesseract 精准**（默认） | winget 装引擎 + `tessdata_best` 简/繁/英 |
 | Windows | 3) 两者 | 内置 OCR 优先 + Tesseract 兜底 |
@@ -42,7 +45,7 @@ irm https://raw.githubusercontent.com/nfeuism/markitdown-rs/main/install.ps1 | i
 非交互（CI / 脚本）用环境变量跳过提问：
 
 ```bash
-MARKITDOWN_OCR=vision curl -fsSL .../install.sh | bash      # 或 tesseract / auto
+MARKITDOWN_OCR=vision curl -fsSL .../install.sh | bash      # 或 tesseract / auto / paddleocr-vl
 ```
 ```powershell
 $env:MARKITDOWN_OCR='tesseract'; irm .../install.ps1 | iex  # 或 winocr / auto
@@ -83,6 +86,95 @@ brew install poppler                    # 非 macOS 上渲染扫描 PDF
 
 ---
 
+## 可选：挂载本地 PaddleOCR-VL-1.6（0.9B VLM）
+
+**默认关闭、显式选择才启用**。它专门补 Apple Vision 的短板：复杂表格、公式、印章、生僻字、版面阅读顺序。
+
+### 本机已挂载的模型
+
+| 项 | 值 |
+|---|---|
+| 目录 | `/Users/zosie/PaddleOCR-VL-1.6-4bit`（本项目按 `$HOME/PaddleOCR-VL-1.6-4bit` 自动探测） |
+| 来源 | ModelScope `mlx-community/PaddleOCR-VL-1.6-4bit`，4-bit MLX 量化 |
+| 权重 | `model.safetensors` 703,562,705 B ≈ 671 MiB；`tokenizer.json` 11.2 MB |
+| 配置 | `model_type: paddleocr_vl`，4-bit affine（group_size 64），924 个张量 |
+| 许可 | Apache-2.0 |
+
+> 权重是用 `git lfs pull` 补齐的。若只 `git clone` 而不拉 LFS，`model.safetensors`
+> 会是 134 字节的指针，MLX 无法加载；`scripts/start-paddleocr-vl.sh --check` 会检测并提示。
+
+### 架构
+
+0.9B 权重塞不进 2.5 MB 的 Rust 二进制，所以是**独立本地服务 + HTTP**：
+
+```
+浏览器 → markitdown-rs (Rust :5001) → 127.0.0.1:8111/v1/chat/completions
+                                              ↓
+                              mlx_vlm.server（隔离 Python 3.12 venv）
+                                              ↓
+                              PaddleOCR-VL-1.6-4bit 本地目录
+                                              ↓
+                              Apple Silicon Metal GPU（MLX 默认设备 = gpu）
+```
+
+- **GPU**：MLX 默认设备就是 `Device(gpu, 0)`，本机实测 Metal 可用、芯片 Apple M4、16GB 统一内存。加载即走 Metal GPU，无需任何参数；不是 CUDA，也不是 ANE。
+- **不进 `auto` 链路**，默认仍是零下载的 Apple Vision。服务没起时 UI 置灰并显示启动命令；显式选中但不可达会明确报错。
+- **不联网、不上传**：服务只绑定 `127.0.0.1`，模型从本地目录读取。
+- [官方 Apple Silicon 教程](https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/docs/version3.x/pipeline_usage/PaddleOCR-VL-Apple-Silicon.md) 明确 M4 是唯一完成精度验证的芯片；本机正是 M4 Mac mini。
+
+### 启用
+
+```bash
+./scripts/start-paddleocr-vl.sh --check   # 探测权重与服务状态
+./scripts/start-paddleocr-vl.sh           # 前台启动（Ctrl-C 停止）
+```
+
+脚本会：验证本地权重不是 LFS 指针 → 用 `uv` 建隔离 Python 3.12 venv（`.venv-vlm/`）
+并装 `mlx-vlm` → 以 `--model <本地目录>` 启动 `mlx_vlm.server`。起来后在 WebUI 的
+「OCR 引擎」下拉里选 **PaddleOCR-VL-1.6**。
+
+覆盖路径与参数：
+
+| 变量 | 默认值 |
+|---|---|
+| `MARKITDOWN_VLM_MODEL` | 自动探测 `$HOME/PaddleOCR-VL-1.6-4bit`，否则 `mlx-community/PaddleOCR-VL-1.6-4bit` |
+| `MARKITDOWN_VLM_URL` | `http://127.0.0.1:8111` |
+| `MARKITDOWN_VLM_PORT` | `8111` |
+| `MARKITDOWN_VLM_PROMPT` | `OCR:` |
+| `MARKITDOWN_VLM_TIMEOUT_SECS` | `300` |
+
+命令行直接试（不经过 WebUI）：
+
+```bash
+.venv-vlm/bin/python -m mlx_vlm generate \
+  --model /Users/zosie/PaddleOCR-VL-1.6-4bit \
+  --image /path/to/invoice.png --prompt "OCR:" --max-tokens 512
+```
+
+> 用**绝对路径**做 `--model`，不要写 repo id —— 否则 `mlx_vlm` 会重新下载一份到
+> `~/.cache/huggingface/hub/`，白费 0.7GB。
+
+### 本机实机验证（2026-11-06，M4 Mac mini / 16GB / macOS 26.2）
+
+| 检查 | 结果 |
+|---|---|
+| `git lfs pull` | `model.safetensors` 703,562,705 B、`tokenizer.json` 11,188,983 B |
+| MLX 环境 | `mlx 0.32.4` / `mlx-vlm 0.7.12`，`default_device = Device(gpu, 0)`，Metal 可用 |
+| `scripts/start-paddleocr-vl.sh` | 权重校验通过 → 复用 `.venv-vlm` → 模型 **约 1 秒加载完成**，`/health` 返回 `loaded_model: /Users/zosie/PaddleOCR-VL-1.6-4bit` |
+| Rust capabilities | `paddleocr_vl: true`，模型路径自动解析为本地目录 |
+| 中文图片 `chinese.png` | `简体中文 OCR 精准识别测试 / MarkItDown WebUI 2026 / 上海 · 北京 · 深圳 12345` —— 比 Apple Vision 的 `MarkltDown WebUl` 拼写更准 |
+| 水费电子发票 PDF | 440 字符，购买方/销售方分节、表格行 `*水冰雪*水费 经营用水 吨 1 3.7378640776699 3.74 3% 0.11`、合计 `¥3.74 / ¥0.11` 都保留了结构；Vision 会把表格散成一行行并出现错字 |
+
+仍有小瑕疵（如「电子发票（普发票）」漏字、大写金额前一个 `⊗` 符号、个别数字与 Vision 结果不一致），说明它也不是逐字无损；复杂票据建议人工复核关键数字。
+
+### 已知限制（诚实说明）
+
+- [官方教程 3.1 节](https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/docs/version3.x/pipeline_usage/PaddleOCR-VL-Apple-Silicon.md) 明确：`mlx_vlm.server` **只负责 VLM 推理环节**，不提供完整端到端文档解析 API，且「强烈不建议直接通过 HTTP 请求或 OpenAI 客户端调用该服务处理文档图像」。本项目的 Rust 端正是直接调 `/v1/chat/completions`，因此拿到的是**元素级 OCR / 文本 spotting**，不含 PaddlePaddle 那层的版面检测与裁剪。要完整 page-level 解析需额外部署官方 pipeline（Apple Silicon 上不支持官方 Docker 镜像，只能手动装 PaddlePaddle CPU + `paddleocr[doc-parser]`）。
+- 权重作者自测（M2 Pro / 32GB，非本机）：4bit 约 455 tok/s decode、峰值 0.785GB；并警告不同 prompt 下量化档位排序会翻转、样本不含照片/手写。**不是中文精度保证**，建议用自己的发票样本 A/B。
+- 首次启动要加载 0.7GB 权重，比 Apple Vision（~0.1s）慢得多；长文档别进 `auto`。
+
+---
+
 ## 新旧对比
 
 | | 原项目 (markitdown-webui2) | markitdown-rs |
@@ -109,8 +201,10 @@ src/convert.rs     格式分发；纯 Rust 优先，可选 markitdown CLI，图�
 src/documents.rs   txt/csv/json/xml/html/docx/xlsx/pptx/pdf 文字层的纯 Rust 转换器
 src/ocr.rs         Apple Vision (FFI) / Windows 内置 OCR / Tesseract / PDF 渲染
 src/winocr.rs      Windows.Media.Ocr 桥接（内嵌 PowerShell 脚本，失败自动回退）
+src/vlm.rs         可选 PaddleOCR-VL-1.6 客户端（本地 MLX 服务，自动探测 $HOME 模型目录）
 src/vision_ocr.m   macOS 原生桥：Vision 文字识别 + PDFKit 逐页渲染（ARC，C ABI）
 scripts/winocr.ps1 Windows 内置 OCR 脚本（编译期内嵌）
+scripts/start-paddleocr-vl.sh  启动本地 PaddleOCR-VL MLX 服务（Metal GPU）
 build.rs           用 cc 编译 .m 并链接系统框架（用 CARGO_CFG_TARGET_OS 判断目标平台）
 static/index.html  单页 WebUI（无构建、无 CDN、无外部资源）
 install.sh / install.ps1   一行命令安装器（交互式选 OCR 引擎）

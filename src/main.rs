@@ -6,6 +6,7 @@
 mod convert;
 mod documents;
 mod ocr;
+mod vlm;
 mod winocr;
 
 use axum::extract::{DefaultBodyLimit, Multipart};
@@ -51,6 +52,7 @@ struct Health {
     vision: bool,
     tesseract: bool,
     markitdown: bool,
+    paddleocr_vl: bool,
     default_languages: &'static str,
 }
 
@@ -61,6 +63,9 @@ struct Capabilities {
     vision: bool,
     tesseract: bool,
     markitdown: bool,
+    paddleocr_vl: bool,
+    paddleocr_vl_status: String,
+    paddleocr_vl_model: String,
     /// Engine chosen at install time; the WebUI preselects it.
     default_engine: String,
 }
@@ -115,6 +120,7 @@ async fn health() -> Json<Health> {
         vision: ocr::vision_available(),
         tesseract: ocr::tesseract_available(),
         markitdown: ocr::markitdown_available(),
+        paddleocr_vl: vlm::available(),
         default_languages: "zh-Hans,en-US",
     })
 }
@@ -123,6 +129,7 @@ async fn capabilities() -> Json<Capabilities> {
     let vision = ocr::vision_available();
     let tesseract = ocr::tesseract_available();
     let winocr = winocr::available();
+    let (vlm_ok, vlm_status) = vlm::status();
 
     let auto_label = if cfg!(target_os = "windows") {
         "自动（Windows 内置 OCR → Tesseract）"
@@ -146,6 +153,11 @@ async fn capabilities() -> Json<Capabilities> {
             label: "Tesseract（跨平台兜底）",
             available: tesseract,
         },
+        EngineInfo {
+            id: "paddleocr-vl",
+            label: "PaddleOCR-VL-1.6（0.9B VLM · 高精度 · 可选）",
+            available: vlm_ok,
+        },
     ];
     if cfg!(target_os = "windows") {
         engines.push(EngineInfo {
@@ -168,6 +180,9 @@ async fn capabilities() -> Json<Capabilities> {
         vision,
         tesseract,
         markitdown: ocr::markitdown_available(),
+        paddleocr_vl: vlm_ok,
+        paddleocr_vl_status: vlm_status,
+        paddleocr_vl_model: vlm::VlmConfig::default().model,
         default_engine: convert::configured_engine(),
     })
 }
@@ -214,7 +229,7 @@ async fn api_convert(mut multipart: Multipart) -> Result<Json<ConvertOk>, ApiErr
     }
 
     let (filename, bytes) = file.ok_or_else(|| ApiError("没有收到文件".to_string()))?;
-    if let Some(engine) = ["auto", "vision", "tesseract", "winocr"]
+    if let Some(engine) = ["auto", "vision", "tesseract", "winocr", "paddleocr-vl"]
         .iter()
         .find(|e| **e == options.engine)
     {
@@ -285,6 +300,14 @@ async fn main() {
     eprintln!("  Vision    {}", yes_no(ocr::vision_available()));
     eprintln!("  Tesseract {}", yes_no(ocr::tesseract_available()));
     eprintln!("  MarkItDown CLI {}", yes_no(ocr::markitdown_available()));
+    let (vlm_ok, vlm_note) = vlm::status();
+    eprintln!(
+        "  PaddleOCR-VL-1.6 {}",
+        if vlm_ok { "可用" } else { "未启用（可选）" }
+    );
+    if !vlm_ok {
+        eprintln!("    {vlm_note}");
+    }
     eprintln!("  仅监听 {socket}，不会暴露到局域网");
 
     if args.open {

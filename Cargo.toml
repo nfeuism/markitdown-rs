@@ -18,6 +18,10 @@ pdf-extract = "0.7"
 # Same version pdf-extract already uses: inspect font encodings before parsing
 # so we can skip the panicking branch entirely (no extra compile cost).
 lopdf = { version = "0.34", default-features = false, features = ["nom_parser"] }
+# Optional PaddleOCR-VL-1.6 backend: talk to a *local* mlx_vlm.server over
+# plain HTTP on 127.0.0.1. No TLS needed, so disable ureq's default rustls
+# feature (it would pull in ring and require a C toolchain on cross-builds).
+ureq = { version = "3", default-features = false, features = ["json"] }
 
 [build-dependencies]
 # Needed by build.rs on every target (the file is compiled even when the

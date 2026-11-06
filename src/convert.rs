@@ -34,10 +34,12 @@ pub struct Options {
 
 /// The OCR engine chosen at install time. The installer writes it into the
 /// launcher script; the WebUI still lets the user override it per conversion.
-/// macOS: `auto` | `vision` | `tesseract`. Windows: `auto` | `tesseract` | `winocr`.
+/// `auto` | `vision` | `tesseract` | `winocr` | `paddleocr-vl`.
 pub fn configured_engine() -> String {
     let candidate = std::env::var("MARKITDOWN_OCR_ENGINE").unwrap_or_default();
-    if ["auto", "vision", "tesseract", "winocr"].contains(&candidate.as_str()) {
+    if ["auto", "vision", "tesseract", "winocr", "paddleocr-vl"]
+        .contains(&candidate.as_str())
+    {
         candidate
     } else {
         "auto".to_string()

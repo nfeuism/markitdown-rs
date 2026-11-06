@@ -60,6 +60,9 @@
   .check{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer}
   .check input{width:16px;height:16px;accent-color:var(--scan)}
   .check small{color:var(--muted)}
+  .vlminfo{margin-top:18px;padding:12px 14px;border:1px dashed var(--line);border-radius:10px;background:#f7faff;color:var(--muted);font-size:12px;line-height:1.7}
+  .vlminfo code{font-size:11px}
+  .vlmnote{color:var(--muted);font:11px/1.5 var(--data);word-break:break-all}
   .actions{display:flex;align-items:center;gap:14px;margin-top:24px;flex-wrap:wrap}
   .primary{padding:12px 26px;border:0;border-radius:10px;background:var(--scan);color:#fff;font:650 15px/1 var(--body);cursor:pointer;box-shadow:0 8px 18px rgba(22,100,216,.22)}
   .primary:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
@@ -111,6 +114,7 @@
       <label class="check"><input type="checkbox" id="ocrpdf" checked><span>扫描版 PDF 自动 OCR <small>（无文字层时逐页识别）</small></span></label>
       <label class="check"><input type="checkbox" id="usemd"><span>优先使用 MarkItDown CLI <small id="mdhint">（可选，需已安装）</small></span></label>
     </div>
+    <div class="vlminfo" id="vlminfo">正在读取引擎状态…</div>
 
     <div class="actions">
       <button class="primary" id="run">开始转换</button>
@@ -170,8 +174,9 @@ drop.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') 
 
 fetch('/api/ocr-capabilities').then(r => r.json()).then(c => {
   $('caps').innerHTML = [
-    ['Apple Vision', c.vision], ['Tesseract', c.tesseract], ['MarkItDown CLI', c.markitdown]
-  ].map(([n,ok]) => `<span class="chip ${ok?'ok':''}"><span class="dot"></span>${n} · ${ok?'可用':'未安装'}</span>`).join('');
+    ['Apple Vision', c.vision], ['Tesseract', c.tesseract],
+    ['MarkItDown CLI', c.markitdown], ['PaddleOCR-VL-1.6', c.paddleocr_vl]
+  ].map(([n,ok]) => `<span class="chip ${ok?'ok':''}"><span class="dot"></span>${n} · ${ok?'可用':'未启用'}</span>`).join('');
   $('engine').innerHTML = c.engines.map(e =>
     `<option value="${e.id}" ${e.available?'':'disabled'}>${e.label}${e.available?'':'（不可用）'}</option>`).join('');
   if (c.default_engine && [...$('engine').options].some(o => o.value === c.default_engine && !o.disabled)) {
@@ -180,6 +185,10 @@ fetch('/api/ocr-capabilities').then(r => r.json()).then(c => {
   $('languages').innerHTML = c.language_presets.map(p =>
     `<option value="${p.id}">${p.label}</option>`).join('');
   if (!c.markitdown) { $('usemd').disabled = true; $('mdhint').textContent = '（未检测到 markitdown 命令）'; }
+  $('vlminfo').innerHTML = `<strong>高精度 VLM（可选，默认关闭）</strong><br>模型：<code>${esc(c.paddleocr_vl_model || '')}</code><br>`
+    + (c.paddleocr_vl
+        ? '状态：已连接，可在「OCR 引擎」中选择；不会进入「自动」链路。走本机 Metal GPU。'
+        : `状态：${esc(c.paddleocr_vl_status || '')}<br>启用：<code>./scripts/start-paddleocr-vl.sh</code>`);
 }).catch(() => { $('caps').innerHTML = '<span class="chip">无法读取引擎状态</span>'; });
 
 function setBusy(on){

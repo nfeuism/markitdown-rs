@@ -196,11 +196,18 @@ fn tesseract_ocr(bytes: &[u8], languages: &str) -> Result<String, String> {
 }
 
 /// Recognise one image. Returns `(engine label, text)`.
+///
+/// `paddleocr-vl` is an explicit opt-in high-accuracy backend backed by a
+/// separately started local MLX server. It is never selected by `auto`.
 pub fn ocr_image(
     bytes: &[u8],
     engine: &str,
     languages: &str,
 ) -> Result<(String, String), String> {
+    if engine == "paddleocr-vl" {
+        return crate::vlm::ocr_image(bytes);
+    }
+
     let want_vision = matches!(engine, "auto" | "vision");
     let want_winocr = matches!(engine, "auto" | "winocr") && winocr_available();
     let want_tesseract = matches!(engine, "auto" | "tesseract");

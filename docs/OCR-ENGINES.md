@@ -1,8 +1,8 @@
 # OCR 引擎选型说明（macOS / Windows）
 
-> 本文档只说明**本项目实际采用**的 OCR 引擎及安装时的选择。第三方 ONNX / VLM
-> 模型方案已按需求从代码与文档中全部移除，不在本项目范围内。
-> 核实时间基准：2026-11-06；引用均为一手源，未做真机 benchmark。
+> 本文档说明**本项目实际采用**的 OCR 引擎及安装时的选择。外部 ONNX 轻量识别模型
+> 未接入；本地已挂载的 PaddleOCR-VL-1.6 见第 6 节。
+> 核实时间基准：2026-11-06；引用均为一手源，VLM 部分已在本机 M4 实机跑通。
 
 ## 1. 本项目支持的引擎
 
@@ -11,8 +11,9 @@
 | **Apple Vision** `VNRecognizeTextRequest` | macOS 11+ | 0 MB | ✅ | 简/繁中文、中英混排好 | 系统 ANE/GPU 加速、~0.1s/图；无版面/表格理解 |
 | **Windows 内置 OCR** `Windows.Media.Ocr` | Windows 10/11 | 0 MB | ✅ | 需 zh-CN / zh-TW OCR 语言包 | 词框 + 行；无版面/表格/公式；失败自动回退 Tesseract |
 | **Tesseract 5** | 全平台 | chi_sim best 12.47 MiB + 引擎 | ✅ | 清晰印刷体可用，复杂中文偏弱 | 跨平台兜底；`tessdata_best` 比 `fast` 准 |
+| **PaddleOCR-VL-1.6**（可选，默认关闭） | macOS Apple Silicon | 671 MiB（本地已挂载） | ✅ | 表格/公式/印章/生僻字更强 | 走 Metal GPU；需独立本地 MLX 服务，见第 6 节 |
 
-三者都**不联网、不上传**，服务固定绑定 `127.0.0.1`。
+四者都**不联网、不上传**，服务固定绑定 `127.0.0.1`。
 
 ## 2. 安装时如何选择
 
@@ -24,6 +25,7 @@ WebUI 会预选该引擎，用户仍可在页面上临时改。
 | macOS | 1) Apple Vision（默认） | 无 | 否 |
 | macOS | 2) Tesseract | `brew install tesseract tesseract-lang` | 装依赖时需联网 |
 | macOS | 3) 两者 | 同 2，引擎设为 `auto` | 装依赖时需联网 |
+| macOS | 4) PaddleOCR-VL（可选） | 探测本地模型目录，写 `MARKITDOWN_VLM_MODEL`；服务由 `start-paddleocr-vl.sh` 启动 | 首次建 MLX 环境时需联网 |
 | Windows | 1) Windows 内置 OCR | 检测并提示安装 `Language.OCR~~~zh-CN~0.0.1.0` | **是**（管理员 + Windows Update/FOD） |
 | Windows | 2) Tesseract 精准（默认） | winget 装 Tesseract + 下载 `tessdata_best` 的 chi_sim/chi_tra/eng | 装依赖时需联网 |
 | Windows | 3) 两者 | 同上，引擎设为 `auto` | 是 |
@@ -80,13 +82,28 @@ Text OCR 段落级归一化编辑距离（越低越好）：ZH 子集 **Tesserac
 `tessdata_best/chi_sim` 12.47 MiB 最准最慢，`tessdata_fast/chi_sim` 2.35 MiB 最快最不准。
 安装器默认下载 `best` 的 chi_sim / chi_tra / eng。
 
-## 6. 为什么没有更高精度的模型
+## 6. 可选高精度层：本地挂载的 PaddleOCR-VL-1.6
 
-更高精度的第三方方案（外部 ONNX 识别模型、文档 VLM 等）**按需求已全部移除**：
-它们要么需要随包携带 ONNX Runtime / DirectML 运行时与模型权重，要么需要 Python + CUDA/WSL2/Docker
-或额外的本地推理服务，与「单二进制、一行命令安装、纯离线」的目标冲突。
-本项目的取舍是：**系统内置 OCR 负责零下载快速通道，Tesseract 负责跨平台兜底**，
-复杂表格、公式、竖排、手写、印章不在能力范围内。
+**默认关闭、显式选择才启用**，且仅 macOS / Apple Silicon。本机已挂载
+`$HOME/PaddleOCR-VL-1.6-4bit`（4-bit MLX 量化，权重 703,562,705 B ≈ 671 MiB，
+ModelScope 来源，Apache-2.0）。启用方式与完整说明见 [README](../README.md)。
+
+| 项 | 说明 |
+|---|---|
+| 推理位置 | 独立 `mlx_vlm.server` 进程；MLX 默认 `Device(gpu, 0)` → **Metal GPU**，不是 CUDA 也不是 ANE |
+| Rust 侧 | 只做 HTTP 客户端（`ureq` → `127.0.0.1:8111/v1/chat/completions`），不打包权重 |
+| 链路 | 不进 `auto`；服务不可达时明确报错，不静默降级 |
+| 能力 | 补 Apple Vision 的短板：复杂表格、公式、印章、生僻字、版面 |
+| 代价 | 需要隔离 Python 3.12 venv（`.venv-vlm/`）+ 0.7GB 权重 + 常驻服务；首次加载远慢于 Vision |
+
+⚠️ [官方 Apple Silicon 教程](https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/docs/version3.x/pipeline_usage/PaddleOCR-VL-Apple-Silicon.md) 明确：`mlx_vlm.server` 只负责 VLM 推理环节，
+「强烈不建议直接通过 HTTP 请求或 OpenAI 客户端调用该服务处理文档图像」。
+本项目正是直接调用，因此结果是**元素级 OCR / 文本 spotting**，不含 PaddlePaddle 那层的
+版面检测与裁剪；完整 page-level 解析需另外手动部署官方 pipeline（Apple Silicon 不支持官方 Docker 镜像）。
+
+其余更高精度的第三方方案（外部 ONNX 识别模型、其它文档 VLM）**仍未接入**：
+需要随包携带运行时与权重，或 Python + CUDA/WSL2/Docker，与「单二进制、一行命令、纯离线」冲突。
+默认取舍仍是：**系统内置 OCR 零下载快速通道 + Tesseract 跨平台兜底**，复杂表格/公式/竖排/手写由可选的 VLM 层承担。
 
 ## 7. 主要来源
 

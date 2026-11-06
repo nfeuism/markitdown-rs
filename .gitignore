@@ -1,4 +1,6 @@
 /target
 *.log
 .DS_Store
+# Optional PaddleOCR-VL MLX backend (isolated Python venv)
+.venv-vlm/
 
