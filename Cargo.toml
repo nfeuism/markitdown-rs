@@ -1,0 +1,33 @@
+[package]
+name = "markitdown-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Lean single-binary local WebUI: documents -> Markdown, with Apple Vision Chinese OCR"
+license = "MIT"
+
+[dependencies]
+axum = { version = "0.8", features = ["multipart"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+uuid = { version = "1", features = ["v4"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+quick-xml = "0.37"
+pdf-extract = "0.7"
+# Same version pdf-extract already uses: inspect font encodings before parsing
+# so we can skip the panicking branch entirely (no extra compile cost).
+lopdf = { version = "0.34", default-features = false, features = ["nom_parser"] }
+# Optional high-accuracy VLM backend: talk to a *local* mlx_vlm.server
+# (OpenAI-compatible). No model weights are bundled into this binary.
+ureq = { version = "3", features = ["json"] }
+
+[target.'cfg(target_os = "macos")'.build-dependencies]
+cc = "1"
+
+[profile.release]
+opt-level = 2
+lto = true
+strip = true
+# Keep unwinding: a malformed PDF must never abort the whole web server.
+# Parsers are wrapped in catch_unwind, and abort would defeat that isolation.
