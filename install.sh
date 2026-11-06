@@ -50,7 +50,7 @@ printf '请选择 OCR 引擎（中文识别）：\n' >&2
 printf '  1) Apple Vision   系统内置、零下载、中文精准、走 ANE 加速  [推荐]\n' >&2
 printf '  2) Tesseract      brew 安装简体/繁体中文包，跨平台兜底\n' >&2
 printf '  3) 两者都要       Vision 优先 + Tesseract 兜底（最稳）\n' >&2
-printf '  4) PaddleOCR-VL   0.9B VLM 高精度（可选，需本地模型目录，见后）\n' >&2
+printf '  4) PaddleOCR-VL   0.9B VLM 高精度（可选，自动下载 4-bit MLX 模型约 0.7GB）\n' >&2
 printf '\n' >&2
 
 CHOICE="${MARKITDOWN_OCR:-}"
