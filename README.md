@@ -37,10 +37,27 @@ irm https://raw.githubusercontent.com/nfeuism/markitdown-rs/main/install.ps1 | i
 | macOS | 1) **Apple Vision**（默认） | 系统内置、零下载、中文精准、ANE 加速 |
 | macOS | 2) Tesseract | `brew` 装简体/繁体中文包，跨平台兜底 |
 | macOS | 3) 两者 | Vision 优先 + Tesseract 兜底 |
-| macOS | 4) **PaddleOCR-VL**（可选） | 挂载本地 0.9B VLM，走 M 系列 Metal GPU；需 `scripts/start-paddleocr-vl.sh` |
+| macOS | 4) **PaddleOCR-VL**（可选） | 克隆 4-bit MLX 量化模型，走 M 系列 Metal GPU；需 `scripts/start-paddleocr-vl.sh` |
 | Windows | 1) Windows 内置 OCR | 系统级、零模型，**需 zh-CN OCR 语言包**（管理员/联网） |
 | Windows | 2) **Tesseract 精准**（默认） | winget 装引擎 + `tessdata_best` 简/繁/英 |
 | Windows | 3) 两者 | 内置 OCR 优先 + Tesseract 兜底 |
+| Windows | 4) **PaddleOCR-VL**（可选） | 克隆官方 BF16 模型（约 1.79 GiB）；推理需另起服务，见下 |
+
+**选项 4 会自动挂载模型**（两个平台用不同仓库/格式，安装器自动判断）：
+
+| 平台 | 安装器执行的命令 | 权重 |
+|---|---|---|
+| macOS | `git clone https://www.modelscope.cn/mlx-community/PaddleOCR-VL-1.6-4bit.git ~/PaddleOCR-VL-1.6-4bit` | `model.safetensors` 703,562,705 B ≈ 671 MiB（4-bit MLX） |
+| Windows | `git clone https://www.modelscope.cn/PaddlePaddle/PaddleOCR-VL-1.6.git %USERPROFILE%\PaddleOCR-VL-1.6` | `model.safetensors` 1,917,255,968 B ≈ 1.79 GiB（官方 BF16） |
+
+两个仓库都用 **Git LFS**：安装器会检测 `git-lfs`，自动 `git lfs install --local && git lfs pull`，
+并校验 `model.safetensors` 不是 134 字节的指针。没装 git-lfs 时会打印修复命令，其余 OCR 不受影响。
+已存在的目录会被复用，不会重复克隆。
+
+> ⚠️ **平台差异**：Windows 没有 MLX，官方 BF16 权重**不能**直接用 macOS 那套 `mlx_vlm.server` 跑。
+> 官方建议 WSL2 + Docker 或 PaddlePaddle CPU 部署推理服务；服务起来后设置
+> `MARKITDOWN_VLM_URL` 指向你的 OpenAI 兼容 endpoint，WebUI 的 VLM 选项即可启用。
+> 安装器在 Windows 上会明确打印这段提示，不会假装已经可用。
 
 非交互（CI / 脚本）用环境变量跳过提问：
 
@@ -48,7 +65,7 @@ irm https://raw.githubusercontent.com/nfeuism/markitdown-rs/main/install.ps1 | i
 MARKITDOWN_OCR=vision curl -fsSL .../install.sh | bash      # 或 tesseract / auto / paddleocr-vl
 ```
 ```powershell
-$env:MARKITDOWN_OCR='tesseract'; irm .../install.ps1 | iex  # 或 winocr / auto
+$env:MARKITDOWN_OCR='tesseract'; irm .../install.ps1 | iex  # 或 winocr / auto / paddleocr-vl
 ```
 
 其它可覆盖变量：`MARKITDOWN_PORT`（默认 5001）、`MARKITDOWN_INSTALL_DIR`。

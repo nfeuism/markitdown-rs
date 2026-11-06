@@ -32,7 +32,9 @@ impl Default for VlmConfig {
         Self {
             url: std::env::var("MARKITDOWN_VLM_URL").unwrap_or_else(|_| DEFAULT_URL.to_string()),
             model: std::env::var("MARKITDOWN_VLM_MODEL")
-                .unwrap_or_else(|_| discover_local_model()),
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .unwrap_or_else(discover_local_model),
             prompt: std::env::var("MARKITDOWN_VLM_PROMPT")
                 .unwrap_or_else(|_| DEFAULT_PROMPT.to_string()),
             timeout_secs: std::env::var("MARKITDOWN_VLM_TIMEOUT_SECS")
@@ -46,13 +48,26 @@ impl Default for VlmConfig {
 /// Pick up a locally mounted model directory automatically, so the WebUI and
 /// the startup script agree on the same weights without hard-coded paths.
 /// Override with `MARKITDOWN_VLM_MODEL` (a repo id or an absolute path).
+///
+/// The two installers mount different formats:
+///   * macOS   `~/PaddleOCR-VL-1.6-4bit`  (4-bit MLX quant, Metal GPU)
+///   * Windows `%USERPROFILE%\PaddleOCR-VL-1.6` (official BF16)
+fn model_dir_candidates() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for key in ["HOME", "USERPROFILE"] {
+        let Ok(home) = std::env::var(key) else { continue };
+        for name in ["PaddleOCR-VL-1.6-4bit", "PaddleOCR-VL-1.6"] {
+            out.push(PathBuf::from(&home).join(name));
+        }
+    }
+    out
+}
+
 fn discover_local_model() -> String {
-    let Ok(home) = std::env::var("HOME") else {
-        return FALLBACK_MODEL.to_string();
-    };
-    let candidate = PathBuf::from(home).join("PaddleOCR-VL-1.6-4bit");
-    if candidate.join("config.json").is_file() {
-        return candidate.to_string_lossy().into_owned();
+    for candidate in model_dir_candidates() {
+        if candidate.join("config.json").is_file() {
+            return candidate.to_string_lossy().into_owned();
+        }
     }
     FALLBACK_MODEL.to_string()
 }
@@ -227,6 +242,16 @@ mod tests {
         // On this machine ~/PaddleOCR-VL-1.6-4bit exists. On others the
         // fallback repo id is used; both are non-empty.
         assert!(!VlmConfig::default().model.is_empty());
+    }
+
+    #[test]
+    fn both_platform_dir_names_are_probed() {
+        let names: Vec<String> = model_dir_candidates()
+            .iter()
+            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .collect();
+        assert!(names.contains(&"PaddleOCR-VL-1.6-4bit".to_string()));
+        assert!(names.contains(&"PaddleOCR-VL-1.6".to_string()));
     }
 
     #[test]

@@ -25,10 +25,15 @@ WebUI 会预选该引擎，用户仍可在页面上临时改。
 | macOS | 1) Apple Vision（默认） | 无 | 否 |
 | macOS | 2) Tesseract | `brew install tesseract tesseract-lang` | 装依赖时需联网 |
 | macOS | 3) 两者 | 同 2，引擎设为 `auto` | 装依赖时需联网 |
-| macOS | 4) PaddleOCR-VL（可选） | 探测本地模型目录，写 `MARKITDOWN_VLM_MODEL`；服务由 `start-paddleocr-vl.sh` 启动 | 首次建 MLX 环境时需联网 |
+| macOS | 4) PaddleOCR-VL（可选） | `git clone .../mlx-community/PaddleOCR-VL-1.6-4bit.git`（4-bit MLX，671 MiB）+ LFS 拉取 | 克隆时需联网 |
 | Windows | 1) Windows 内置 OCR | 检测并提示安装 `Language.OCR~~~zh-CN~0.0.1.0` | **是**（管理员 + Windows Update/FOD） |
 | Windows | 2) Tesseract 精准（默认） | winget 装 Tesseract + 下载 `tessdata_best` 的 chi_sim/chi_tra/eng | 装依赖时需联网 |
 | Windows | 3) 两者 | 同上，引擎设为 `auto` | 是 |
+| Windows | 4) PaddleOCR-VL（可选） | `git clone .../PaddlePaddle/PaddleOCR-VL-1.6.git`（官方 BF16，1.79 GiB）+ LFS 拉取 | 克隆时需联网 |
+
+**两个平台的第 4 项不是同一套推理**：macOS 用 4-bit MLX 权重 + `mlx_vlm.server`（Metal GPU，见第 6 节）；
+Windows 没有 MLX，官方 BF16 权重需 WSL2+Docker 或 PaddlePaddle CPU 另起服务，再把
+`MARKITDOWN_VLM_URL` 指向该服务。安装器会如实打印这个限制，不会把选项伪装成开箱即用。
 
 **「纯离线」的准确含义**：运行时全部离线；安装阶段下载二进制、Tesseract 或语言包需要联网。
 真正零下载的组合是 macOS 的 Apple Vision，或 Windows 已预装 zh-CN OCR 语言包的情况。

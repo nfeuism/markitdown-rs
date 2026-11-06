@@ -70,20 +70,46 @@ esac
 info "已选择：$DESC → 默认引擎 $ENGINE"
 
 # ---- optional local VLM model mount ----------------------------------------
+# The model repos use Git LFS: a plain `git clone` yields 134-byte pointers,
+# so we always verify the real weights and pull them when needed.
+VLM_MAC_REPO="${MARKITDOWN_VLM_REPO:-https://www.modelscope.cn/mlx-community/PaddleOCR-VL-1.6-4bit.git}"
+
+mount_vlm_model() {
+  local dir="$1" repo="$2" sz
+  if [[ ! -f "$dir/config.json" ]]; then
+    info "未检测到本地模型，克隆：${repo}"
+    command -v git >/dev/null 2>&1 || die "需要 git 才能克隆模型仓库"
+    rm -rf "$dir"
+    GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 "$repo" "$dir" || die "模型克隆失败：$repo"
+  else
+    info "复用已存在的模型目录：${dir}"
+  fi
+
+  sz="$(stat -f '%z' "$dir/model.safetensors" 2>/dev/null || echo 0)"
+  if (( sz < 1048576 )); then
+    if ! git lfs version >/dev/null 2>&1; then
+      warn "git-lfs 未安装，权重目前只是 LFS 指针。安装后在这个目录执行："
+      warn "  brew install git-lfs && cd '${dir}' && git lfs install --local && git lfs pull"
+      return 1
+    fi
+    info "拉取 Git LFS 权重（约 0.7GB）…"
+    (cd "$dir" && git lfs install --local >/dev/null && git lfs pull) \
+      || warn "git lfs pull 失败，请稍后手动重试"
+    sz="$(stat -f '%z' "$dir/model.safetensors" 2>/dev/null || echo 0)"
+  fi
+
+  if (( sz < 1048576 )); then
+    warn "权重仍未就绪（${sz} 字节）。请执行：cd '${dir}' && git lfs pull"
+    return 1
+  fi
+  info "模型就绪：${dir} ($(( sz / 1048576 )) MiB · 4-bit MLX / Metal GPU)"
+  export MARKITDOWN_VLM_MODEL="$dir"
+  return 0
+}
+
 if [[ "$ENGINE" == "paddleocr-vl" ]]; then
   VLM_DIR="${MARKITDOWN_VLM_MODEL:-$HOME/PaddleOCR-VL-1.6-4bit}"
-  if [[ -f "$VLM_DIR/config.json" ]]; then
-    SZ="$(stat -f '%z' "$VLM_DIR/model.safetensors" 2>/dev/null || echo 0)"
-    if (( SZ < 1048576 )); then
-      warn "检测到 $VLM_DIR，但 model.safetensors 只有 ${SZ} 字节（Git LFS 指针）。"
-      warn "请执行：brew install git-lfs && cd '$VLM_DIR' && git lfs install --local && git lfs pull"
-    else
-      info "已挂载本地模型：$VLM_DIR ($(( SZ / 1048576 )) MiB)"
-    fi
-    export MARKITDOWN_VLM_MODEL="$VLM_DIR"
-  else
-    warn "未找到本地模型目录 $VLM_DIR，服务将按需下载 mlx-community/PaddleOCR-VL-1.6-4bit。"
-  fi
+  mount_vlm_model "$VLM_DIR" "$VLM_MAC_REPO" || true
   warn "启动高精度服务：./scripts/start-paddleocr-vl.sh（需 uv + Python 3.12）"
 fi
 
